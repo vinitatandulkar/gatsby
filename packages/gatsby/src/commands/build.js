@@ -307,4 +307,5 @@ module.exports = async function build(program: BuildArgs) {
       report.info(`.cache/deletedPages.txt created`)
     }
   }
+  return { graphqlRunner }
 }
