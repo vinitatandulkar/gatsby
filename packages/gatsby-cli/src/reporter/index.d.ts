@@ -1,6 +1,6 @@
-// @flow
+import Chalk from "chalk"
 
-export type ActivityTracker = {
+export interface ActivityTracker {
   start(): Function,
   end(): Function,
   setStatus(status: string): Function,
@@ -15,12 +15,12 @@ type LogMessageType = (format: string, ...args: Array<any>) => void
 
 export interface Reporter {
   stripIndent: Function;
-  format: Object;
+  format: typeof Chalk;
   setVerbose(isVerbose: boolean): void;
   setNoColor(isNoColor: boolean): void;
-  panic(...args: Array<any>): void;
-  panicOnBuild(...args: Array<any>): void;
-  error(errorMeta: string | Object, error?: Object): void;
+  panic(errorMeta: unknown, error?: unknown): void;
+  panicOnBuild(errorMeta: unknown, error?: unknown): void;
+  error(errorMeta: unknown, error?: unknown): void;
   uptime(prefix: string): void;
   success: LogMessageType;
   verbose: LogMessageType;
