@@ -4,13 +4,17 @@ import {
   groupQueryIds,
   processPageQueries,
   processStaticQueries,
+  calcInitialDirtyQueryIds,
 } from "../query"
+import createSchemaCustomization from "../utils/create-schema-customization"
+import sourceNodes from "../utils/source-nodes"
+import { store } from "../redux"
+import { writeAll } from "../bootstrap/requires-writer"
 
 export { extractQueries as unstable_extractQueries } from "../query/query-watcher"
 
-import { store } from "../redux"
-
-import { writeAll } from "../bootstrap/requires-writer"
+export const unstable_getDirtyQueryIds = (): string[] =>
+  calcInitialDirtyQueryIds(store.getState())
 
 export const unstable_writeRequires = async (): Promise<boolean> =>
   writeAll(store.getState())
@@ -59,4 +63,15 @@ export const unstable_runQueries = async ({
   }
 
   return pageQueryIds
+}
+
+export const unstable_updateData = async (
+  webhookBody?: string
+): Promise<void> => {
+  await createSchemaCustomization({
+    refresh: true,
+  })
+  await sourceNodes({
+    webhookBody,
+  })
 }

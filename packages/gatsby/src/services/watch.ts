@@ -4,27 +4,45 @@ import { EventEmitter } from "events"
 import { IProgram } from "../commands/types"
 import webpackConfig from "../utils/webpack.config"
 import webpack from "webpack"
-import { store } from "../redux"
+import { store, emitter } from "../redux"
 import path from "path"
 import appDataUtil from "../utils/app-data"
-import schemaHotReloader from "../bootstrap/schema-hot-reloader"
+import bootstrapSchemaHotReloader from "../bootstrap/schema-hot-reloader"
+import bootstrapPageReloader from "../bootstrap/page-hot-reloader"
 import requiresWriter from "../bootstrap/requires-writer"
+import { calculatePagesFromWebpack } from "../utils/calculate-pages-from-webpack"
+import WorkerPool from "../utils/worker/pool"
+import * as GraphQLRunnerNS from "../query/graphql-runner"
+import JestWorker from "jest-worker"
+
 export interface IBuildEventPayload {
   stats: webpack.Stats
   firstRun: boolean
+  chunkHashes: Map<string, string>
+  pages: string[]
+}
+
+export interface ICreatePagesEventPayload {
+  newPages: string[]
+  deletedPages: string[]
 }
 
 export interface IWatchEvents {
   buildComplete: (payload: IBuildEventPayload) => void
   invalidFile: (file: string) => void
   error: (error: Error) => void
+  createPageEnd: (payload: ICreatePagesEventPayload) => void
 }
 
 type WatchEventEmitter = StrictEventEmitter<EventEmitter, IWatchEvents>
 
 export const unstable_startWatching = async (
-  program: IProgram
-): Promise<WatchEventEmitter> => {
+  program: IProgram,
+  graphQLRunner: typeof GraphQLRunnerNS
+): Promise<{
+  eventEmitter: WatchEventEmitter
+  watcher: webpack.Compiler.Watching
+}> => {
   const config = await webpackConfig(
     program,
     program.directory,
@@ -34,17 +52,18 @@ export const unstable_startWatching = async (
 
   const compiler = webpack(config)
 
-  const ee: WatchEventEmitter = new EventEmitter()
+  const eventEmitter: WatchEventEmitter = new EventEmitter()
 
   compiler.hooks.invalid.tap(`watch-service`, file => {
-    ee.emit(`invalidFile`, file)
+    eventEmitter.emit(`invalidFile`, file)
   })
 
   let firstRun = true
+  let prevHashMap: Map<string, string>
 
-  compiler.watch({}, async (err, stats) => {
+  const watcher = compiler.watch({}, async (err, stats) => {
     if (err) {
-      ee.emit(`error`, err)
+      eventEmitter.emit(`error`, err)
       return
     }
 
@@ -61,12 +80,39 @@ export const unstable_startWatching = async (
 
     if (firstRun) {
       requiresWriter.startListener()
-      schemaHotReloader()
+      bootstrapSchemaHotReloader()
+      bootstrapPageReloader(graphQLRunner)
     }
 
-    ee.emit(`buildComplete`, { firstRun, stats })
+    const { chunkHashes, pages } = calculatePagesFromWebpack(
+      stats,
+      store.getState().pages,
+      prevHashMap
+    )
+
+    prevHashMap = chunkHashes
+
+    eventEmitter.emit(`buildComplete`, { firstRun, stats, chunkHashes, pages })
     firstRun = false
   })
 
-  return ee
+  emitter.on(`CREATE_PAGE_END`, ({ deletedPages, newPages }) => {
+    eventEmitter.emit(`createPageEnd`, { deletedPages, newPages })
+  })
+
+  return { eventEmitter, watcher }
 }
+
+export const unstable_waitUntilAllJobsAreFinished = (): Promise<void> =>
+  new Promise(resolve => {
+    const onEndJob = (): void => {
+      if (store.getState().jobs?.active?.length === 0) {
+        resolve()
+        emitter.off(`END_JOB`, onEndJob)
+      }
+    }
+    emitter.on(`END_JOB`, onEndJob)
+    onEndJob()
+  })
+
+export const unstable_getWorkerPool = (): JestWorker => WorkerPool.create()

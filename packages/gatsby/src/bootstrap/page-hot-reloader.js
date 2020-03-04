@@ -1,3 +1,4 @@
+const _ = require(`lodash`)
 const { emitter, store } = require(`../redux`)
 const apiRunnerNode = require(`../utils/api-runner-node`)
 const { boundActionCreators } = require(`../redux/actions`)
@@ -13,8 +14,11 @@ const runCreatePages = async () => {
   const timestamp = Date.now()
 
   // Collect pages.
-  let activity = report.activityTimer(`createPages`)
+  const activity = report.activityTimer(`createPages`)
   activity.start()
+
+  const currentPages = Array.from(store.getState().pages.values())
+
   await apiRunnerNode(
     `createPages`,
     {
@@ -37,8 +41,31 @@ const runCreatePages = async () => {
       deletePage(page)
     }
   })
+  const newPages = Array.from(store.getState().pages.values())
+  const deletedPages = []
 
-  emitter.emit(`CREATE_PAGE_END`)
+  const changedPages = _.differenceWith(
+    newPages,
+    currentPages,
+    (newPage, oldPage) => {
+      if (newPage.path === oldPage.path) {
+        return _.isEqualWith(newPage, oldPage, (left, right, key) => {
+          if (key === `updatedAt`) {
+            return true
+          } else {
+            return undefined
+          }
+        })
+      } else {
+        return false
+      }
+    }
+  )
+
+  emitter.emit(`CREATE_PAGE_END`, {
+    newPages: changedPages.map(page => page.path),
+    deletedPages,
+  })
 }
 
 module.exports = graphqlRunner => {
